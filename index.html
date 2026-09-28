@@ -293,6 +293,7 @@
         var cell = document.createElement('button');
         cell.type = 'button';
         cell.className = 'cell' + (isDone ? ' done' : '') + (isToday ? ' today' : '');
+        cell.dataset.fk = 'd:' + habit.id + ':' + key;
         cell.setAttribute('aria-pressed', String(isDone));
         cell.setAttribute('aria-label',
           habit.name + ' ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + (isDone ? '완료 취소' : '완료'));
@@ -312,6 +313,8 @@
 
   function render() {
     var today = todayKey();
+    var active = document.activeElement;
+    var focusKey = active && active.dataset ? active.dataset.fk : null;
     renderedDay = today;
     renderHeader(today);
     listEl.textContent = '';
@@ -336,6 +339,7 @@
       check.type = 'button';
       check.className = 'check' + (isDone ? ' done' : '');
       check.textContent = '✓';
+      check.dataset.fk = 'c:' + h.id;
       check.setAttribute('aria-pressed', String(isDone));
       check.setAttribute('aria-label', h.name + (isDone ? ' 오늘 완료 취소' : ' 오늘 완료'));
       check.addEventListener('click', function () { toggleDay(h.id, todayKey()); });
@@ -373,6 +377,13 @@
     inputEl.disabled = full;
     addBtn.disabled = full;
     inputEl.placeholder = full ? '습관이 가득 찼어요 (최대 ' + MAX_HABITS + '개)' : '새 습관 이름';
+
+    if (focusKey) {
+      var buttons = listEl.querySelectorAll('button');
+      for (var i = 0; i < buttons.length; i++) {
+        if (buttons[i].dataset.fk === focusKey) { buttons[i].focus(); break; }
+      }
+    }
   }
 
   function renderIfDayChanged() {
