@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>습관 체크</title>
+<style>
+  :root {
+    --bg: #f5f5f4;
+    --card: #ffffff;
+    --text: #1c1917;
+    --muted: #78716c;
+    --line: #d6d3d1;
+    --green: #22c55e;
+    --danger: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 16px; }
+
+  form { display: flex; gap: 8px; }
+  input[type="text"] {
+    flex: 1; min-width: 0; height: 44px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  }
+  button { font: inherit; cursor: pointer; }
+  button:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
+  .add-btn {
+    height: 44px; padding: 0 16px; border: 0; border-radius: 8px;
+    background: var(--text); color: #fff;
+  }
+  .msg { min-height: 1.4em; margin: 6px 2px 12px; font-size: .85rem; color: var(--danger); }
+
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .habit {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px; background: var(--card); border-radius: 10px;
+    border: 1px solid var(--line);
+  }
+  .check {
+    flex: none; width: 44px; height: 44px; border-radius: 50%;
+    border: 2px solid var(--line); background: #fff; color: transparent;
+    font-size: 1.3rem; line-height: 1;
+  }
+  .check.done { background: var(--green); border-color: var(--green); color: #fff; }
+  .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .del {
+    flex: none; width: 40px; height: 40px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--muted); font-size: 1.1rem;
+  }
+  .del:hover { color: var(--danger); }
+  .empty { text-align: center; color: var(--muted); padding: 24px 0; }
+  .warn { margin-top: 12px; font-size: .85rem; color: var(--danger); }
+</style>
+</head>
+<body>
+<main>
+  <h1>습관 체크</h1>
+
+  <form id="add-form" autocomplete="off">
+    <input type="text" id="name-input" maxlength="20" placeholder="새 습관 이름" aria-label="새 습관 이름">
+    <button type="submit" class="add-btn" id="add-btn">추가</button>
+  </form>
+  <p class="msg" id="msg" role="status"></p>
+
+  <ul id="list"></ul>
+  <p class="warn" id="storage-warn" hidden>저장이 되지 않는 환경입니다. 새로고침하면 기록이 사라집니다.</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var STORAGE_KEY = 'habit-tracker-v1';
+  var MAX_HABITS = 8;
+  var MAX_NAME = 20;
+
+  var state = { version: 1, habits: [] };
+  var storageOk = true;
+
+  var listEl = document.getElementById('list');
+  var formEl = document.getElementById('add-form');
+  var inputEl = document.getElementById('name-input');
+  var addBtn = document.getElementById('add-btn');
+  var msgEl = document.getElementById('msg');
+  var warnEl = document.getElementById('storage-warn');
+
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
+
+  function dateKey(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  function todayKey() { return dateKey(new Date()); }
+
+  function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function isDateKey(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
+
+  function sanitize(data) {
+    if (!data || typeof data !== 'object' || !Array.isArray(data.habits)) return null;
+    var habits = [];
+    data.habits.forEach(function (h) {
+      if (!h || typeof h.id !== 'string' || typeof h.name !== 'string' || !h.name.trim()) return;
+      var done = Array.isArray(h.done) ? h.done.filter(isDateKey) : [];
+      done = done.filter(function (d, i) { return done.indexOf(d) === i; });
+      habits.push({
+        id: h.id,
+        name: h.name.slice(0, MAX_NAME),
+        createdAt: isDateKey(h.createdAt) ? h.createdAt : todayKey(),
+        done: done
+      });
+    });
+    return { version: 1, habits: habits.slice(0, MAX_HABITS) };
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var clean = sanitize(JSON.parse(raw));
+      if (clean) state = clean;
+    } catch (e) {
+      state = { version: 1, habits: [] };
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      storageOk = false;
+      warnEl.hidden = false;
+    }
+  }
+
+  function normalize(name) { return name.replace(/\s+/g, '').toLowerCase(); }
+
+  function setMsg(text) { msgEl.textContent = text; }
+
+  function addHabit(rawName) {
+    var name = rawName.trim();
+    if (!name) { setMsg('습관 이름을 입력해 주세요.'); return false; }
+    if (state.habits.length >= MAX_HABITS) { setMsg('습관은 최대 ' + MAX_HABITS + '개까지 추가할 수 있어요.'); return false; }
+    var key = normalize(name);
+    var dup = state.habits.some(function (h) { return normalize(h.name) === key; });
+    if (dup) { setMsg('이미 있는 습관이에요.'); return false; }
+
+    state.habits.push({ id: newId(), name: name, createdAt: todayKey(), done: [] });
+    save();
+    setMsg('');
+    return true;
+  }
+
+  function deleteHabit(id) {
+    var habit = state.habits.filter(function (h) { return h.id === id; })[0];
+    if (!habit) return;
+    if (!confirm("'" + habit.name + "' 습관과 모든 기록을 삭제할까요?")) return;
+    state.habits = state.habits.filter(function (h) { return h.id !== id; });
+    save();
+    setMsg('');
+    render();
+  }
+
+  function toggleDay(id, key) {
+    var habit = state.habits.filter(function (h) { return h.id === id; })[0];
+    if (!habit) return;
+    var i = habit.done.indexOf(key);
+    if (i === -1) habit.done.push(key); else habit.done.splice(i, 1);
+    save();
+    render();
+  }
+
+  function render() {
+    var today = todayKey();
+    listEl.textContent = '';
+
+    if (state.habits.length === 0) {
+      var empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = '아직 습관이 없어요. 위에서 첫 습관을 추가해 보세요.';
+      listEl.appendChild(empty);
+    }
+
+    state.habits.forEach(function (h) {
+      var isDone = h.done.indexOf(today) !== -1;
+
+      var li = document.createElement('li');
+      li.className = 'habit';
+
+      var check = document.createElement('button');
+      check.type = 'button';
+      check.className = 'check' + (isDone ? ' done' : '');
+      check.textContent = '✓';
+      check.setAttribute('aria-pressed', String(isDone));
+      check.setAttribute('aria-label', h.name + (isDone ? ' 오늘 완료 취소' : ' 오늘 완료'));
+      check.addEventListener('click', function () { toggleDay(h.id, todayKey()); });
+
+      var name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = h.name;
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'del';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', h.name + ' 삭제');
+      del.addEventListener('click', function () { deleteHabit(h.id); });
+
+      li.appendChild(check);
+      li.appendChild(name);
+      li.appendChild(del);
+      listEl.appendChild(li);
+    });
+
+    var full = state.habits.length >= MAX_HABITS;
+    inputEl.disabled = full;
+    addBtn.disabled = full;
+    inputEl.placeholder = full ? '습관이 가득 찼어요 (최대 ' + MAX_HABITS + '개)' : '새 습관 이름';
+  }
+
+  formEl.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (addHabit(inputEl.value)) {
+      inputEl.value = '';
+      render();
+      if (!inputEl.disabled) inputEl.focus();
+    }
+  });
+
+  load();
+  render();
+})();
+</script>
+</body>
+</html>
