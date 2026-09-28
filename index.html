@@ -12,6 +12,8 @@
     --muted: #78716c;
     --line: #d6d3d1;
     --green: #22c55e;
+    --green-dark: #15803d;
+    --gray: #e7e5e4;
     --danger: #dc2626;
   }
   * { box-sizing: border-box; }
@@ -23,7 +25,12 @@
     font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
   }
   main { max-width: 480px; margin: 0 auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 16px; }
+
+  header { margin-bottom: 16px; }
+  .date { margin: 0; font-size: .9rem; color: var(--muted); }
+  .summary { margin: 2px 0 0; font-size: 1.8rem; font-weight: 700; }
+  .summary.all-done { color: var(--green-dark); }
+  .summary.no-habits { font-size: 1.1rem; font-weight: 600; color: var(--muted); }
 
   form { display: flex; gap: 8px; }
   input[type="text"] {
@@ -40,29 +47,47 @@
 
   ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
   .habit {
-    display: flex; align-items: center; gap: 12px;
     padding: 12px; background: var(--card); border-radius: 10px;
     border: 1px solid var(--line);
   }
+  .top { display: flex; align-items: center; gap: 12px; }
   .check {
     flex: none; width: 44px; height: 44px; border-radius: 50%;
     border: 2px solid var(--line); background: #fff; color: transparent;
     font-size: 1.3rem; line-height: 1;
   }
   .check.done { background: var(--green); border-color: var(--green); color: #fff; }
-  .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .info { flex: 1; min-width: 0; }
+  .name { display: block; overflow-wrap: anywhere; }
+  .streak { display: block; margin-top: 2px; font-size: .8rem; color: var(--green-dark); font-weight: 600; }
+  .streak.none { color: var(--muted); font-weight: 400; }
   .del {
     flex: none; width: 40px; height: 40px; border: 0; border-radius: 8px;
     background: transparent; color: var(--muted); font-size: 1.1rem;
   }
   .del:hover { color: var(--danger); }
+
+  .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 12px; }
+  .day { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+  .cell {
+    width: 100%; height: 40px; border: 2px solid transparent; border-radius: 8px;
+    background: var(--gray); padding: 0;
+  }
+  .cell.done { background: var(--green); }
+  .cell.today { border-color: var(--text); }
+  .dow { font-size: .7rem; color: var(--muted); }
+  .dow.today { color: var(--text); font-weight: 700; }
+
   .empty { text-align: center; color: var(--muted); padding: 24px 0; }
   .warn { margin-top: 12px; font-size: .85rem; color: var(--danger); }
 </style>
 </head>
 <body>
 <main>
-  <h1>습관 체크</h1>
+  <header>
+    <p class="date" id="date"></p>
+    <p class="summary" id="summary"></p>
+  </header>
 
   <form id="add-form" autocomplete="off">
     <input type="text" id="name-input" maxlength="20" placeholder="새 습관 이름" aria-label="새 습관 이름">
@@ -81,9 +106,10 @@
   var STORAGE_KEY = 'habit-tracker-v1';
   var MAX_HABITS = 8;
   var MAX_NAME = 20;
+  var DOW = ['일', '월', '화', '수', '목', '금', '토'];
 
   var state = { version: 1, habits: [] };
-  var storageOk = true;
+  var renderedDay = '';
 
   var listEl = document.getElementById('list');
   var formEl = document.getElementById('add-form');
@@ -91,6 +117,8 @@
   var addBtn = document.getElementById('add-btn');
   var msgEl = document.getElementById('msg');
   var warnEl = document.getElementById('storage-warn');
+  var dateEl = document.getElementById('date');
+  var summaryEl = document.getElementById('summary');
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
 
@@ -99,6 +127,14 @@
   }
 
   function todayKey() { return dateKey(new Date()); }
+
+  // 정오 기준으로 setDate 하여 서머타임 경계에서도 날짜가 어긋나지 않게 한다.
+  function dateAgo(n) {
+    var d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - n);
+    return d;
+  }
 
   function newId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -138,7 +174,6 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
-      storageOk = false;
       warnEl.hidden = false;
     }
   }
@@ -180,8 +215,70 @@
     render();
   }
 
+  // 오늘을 했으면 오늘부터, 아직이면 어제부터 거꾸로 연속으로 체크된 날 수.
+  function calcStreak(habit) {
+    var set = {};
+    habit.done.forEach(function (k) { set[k] = true; });
+    var n = set[dateKey(dateAgo(0))] ? 0 : 1;
+    var count = 0;
+    while (set[dateKey(dateAgo(n))]) { count++; n++; }
+    return count;
+  }
+
+  function renderHeader(today) {
+    var now = new Date();
+    dateEl.textContent = (now.getMonth() + 1) + '월 ' + now.getDate() + '일 ' + DOW[now.getDay()] + '요일';
+
+    var total = state.habits.length;
+    summaryEl.className = 'summary';
+    if (total === 0) {
+      summaryEl.classList.add('no-habits');
+      summaryEl.textContent = '습관을 추가해 보세요';
+      return;
+    }
+    var doneCount = state.habits.filter(function (h) { return h.done.indexOf(today) !== -1; }).length;
+    summaryEl.textContent = doneCount + '/' + total + ' 완료';
+    if (doneCount === total) summaryEl.classList.add('all-done');
+  }
+
+  function buildWeek(habit, today) {
+    var week = document.createElement('div');
+    week.className = 'week';
+
+    for (var back = 6; back >= 0; back--) {
+      (function (back) {
+        var d = dateAgo(back);
+        var key = dateKey(d);
+        var isDone = habit.done.indexOf(key) !== -1;
+        var isToday = key === today;
+
+        var day = document.createElement('div');
+        day.className = 'day';
+
+        var cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'cell' + (isDone ? ' done' : '') + (isToday ? ' today' : '');
+        cell.setAttribute('aria-pressed', String(isDone));
+        cell.setAttribute('aria-label',
+          habit.name + ' ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + (isDone ? '완료 취소' : '완료'));
+        cell.addEventListener('click', function () { toggleDay(habit.id, key); });
+
+        var dow = document.createElement('span');
+        dow.className = 'dow' + (isToday ? ' today' : '');
+        dow.textContent = DOW[d.getDay()];
+
+        day.appendChild(cell);
+        day.appendChild(dow);
+        week.appendChild(day);
+      })(back);
+    }
+    return week;
+  }
+
   function render() {
     var today = todayKey();
+    renderedDay = today;
+    renderHeader(today);
     listEl.textContent = '';
 
     if (state.habits.length === 0) {
@@ -197,6 +294,9 @@
       var li = document.createElement('li');
       li.className = 'habit';
 
+      var top = document.createElement('div');
+      top.className = 'top';
+
       var check = document.createElement('button');
       check.type = 'button';
       check.className = 'check' + (isDone ? ' done' : '');
@@ -205,9 +305,17 @@
       check.setAttribute('aria-label', h.name + (isDone ? ' 오늘 완료 취소' : ' 오늘 완료'));
       check.addEventListener('click', function () { toggleDay(h.id, todayKey()); });
 
+      var info = document.createElement('div');
+      info.className = 'info';
+
       var name = document.createElement('span');
       name.className = 'name';
       name.textContent = h.name;
+
+      var streakN = calcStreak(h);
+      var streak = document.createElement('span');
+      streak.className = 'streak' + (streakN === 0 ? ' none' : '');
+      streak.textContent = streakN === 0 ? '연속 기록 없음' : '🔥 ' + streakN + '일 연속';
 
       var del = document.createElement('button');
       del.type = 'button';
@@ -216,9 +324,13 @@
       del.setAttribute('aria-label', h.name + ' 삭제');
       del.addEventListener('click', function () { deleteHabit(h.id); });
 
-      li.appendChild(check);
-      li.appendChild(name);
-      li.appendChild(del);
+      info.appendChild(name);
+      info.appendChild(streak);
+      top.appendChild(check);
+      top.appendChild(info);
+      top.appendChild(del);
+      li.appendChild(top);
+      li.appendChild(buildWeek(h, today));
       listEl.appendChild(li);
     });
 
@@ -226,6 +338,10 @@
     inputEl.disabled = full;
     addBtn.disabled = full;
     inputEl.placeholder = full ? '습관이 가득 찼어요 (최대 ' + MAX_HABITS + '개)' : '새 습관 이름';
+  }
+
+  function renderIfDayChanged() {
+    if (todayKey() !== renderedDay) render();
   }
 
   formEl.addEventListener('submit', function (e) {
@@ -236,6 +352,12 @@
       if (!inputEl.disabled) inputEl.focus();
     }
   });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) renderIfDayChanged();
+  });
+  window.addEventListener('focus', renderIfDayChanged);
+  setInterval(renderIfDayChanged, 60000);
 
   load();
   render();
